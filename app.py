@@ -37,7 +37,7 @@ def preprocess_data(df):
     
     df["Tahun"] = df["Tanggal"].dt.year
     df["Bulan"] = df["Tanggal"].dt.month
-    df["Hari"]  = df["Tanggal"].dt.day
+    df["Hari"] = df["Tanggal"].dt.day
     df = df.drop(["Tanggal"], axis=1)
 
     # Konversi Numerik
