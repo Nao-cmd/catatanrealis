@@ -22,18 +22,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# Inisialisasi Scaler dan Encoders di luar fungsi
-scaler_A = StandardScaler()
-label_encoder_product = LabelEncoder()
-label_encoder_transaksi = LabelEncoder()
-
 # ===============================
-# 1. FUNGSI PREPROCESSING DATA (Diperkuat Maksimal)
+# 1. FUNGSI PREPROCESSING DATA & FITTING (TIDAK ADA GLOBAL VAR)
 # ===============================
-@st.cache_data
+@st.cache_data(show_spinner="Melakukan Preprocessing & Fitting Encoders/Scalers...")
 def preprocess_and_fit(df):
-    """Melakukan pembersihan dan transformasi data, serta melatih encoders/scalers."""
-    global scaler_A, label_encoder_product, label_encoder_transaksi
+    """Melakukan pembersihan, transformasi, dan mengembalikan data, encoder, dan scaler."""
+    
+    # Inisialisasi Lokal
+    scaler_A = StandardScaler()
+    label_encoder_product = LabelEncoder()
+    label_encoder_transaksi = LabelEncoder()
+    product_classes = np.array([])
     
     # Cleaning
     df = df.dropna().drop_duplicates()
@@ -52,58 +52,38 @@ def preprocess_and_fit(df):
     for col in kolom_numerik:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna()
-    
-    product_classes = np.array([]) 
 
-    # --- PENANGANAN KRITIS 'NAMA PRODUK' ---
+    # Encoding Data Kategorik (Fit Encoders)
     if "Nama Produk" in df.columns:
-        # Konversi ke string untuk LabelEncoder
         data_produk = df["Nama Produk"].astype(str)
-        
-        # Cek apakah ada lebih dari satu nilai unik untuk di-fit
         if len(data_produk.unique()) > 1:
-            try:
-                # Proses Fitting
-                label_encoder_product.fit(data_produk)
-                df["Nama Produk"] = label_encoder_product.transform(data_produk)
-                product_classes = label_encoder_product.classes_
-            except Exception as e:
-                # Jika fitting gagal (misalnya error memori atau data aneh)
-                st.warning(f"Gagal memproses Nama Produk dengan LabelEncoder: {e}")
-                
-    # --- PENANGANAN 'JENIS TRANSAKSI' ---
+            label_encoder_product.fit(data_produk)
+            df["Nama Produk"] = label_encoder_product.transform(data_produk)
+            product_classes = label_encoder_product.classes_
+
     if "Jenis Transaksi" in df.columns:
         data_transaksi = df["Jenis Transaksi"].astype(str)
         if len(data_transaksi.unique()) > 1:
-             try:
-                label_encoder_transaksi.fit(data_transaksi)
-                df["Jenis Transaksi"] = label_encoder_transaksi.transform(data_transaksi)
-             except Exception as e:
-                st.warning(f"Gagal memproses Jenis Transaksi dengan LabelEncoder: {e}")
+            label_encoder_transaksi.fit(data_transaksi)
+            df["Jenis Transaksi"] = label_encoder_transaksi.transform(data_transaksi)
     
-    return df, product_classes
+    return df, label_encoder_product, label_encoder_transaksi, scaler_A, product_classes
 
 # ===============================
-# 2. FUNGSI PELATIHAN MODEL KLASIFIKASI (Random Forest)
+# 2. FUNGSI PELATIHAN MODEL KLASIFIKASI 
 # ===============================
-@st.cache_resource
+@st.cache_resource(show_spinner="Melatih Random Forest Classifier...")
 def train_classification_model(X_train_A_scaled, y_train_A):
-    """Melatih dan mengembalikan model Random Forest."""
     model_rf = RandomForestClassifier(n_estimators=100, random_state=42)
     model_rf.fit(X_train_A_scaled, y_train_A)
     return model_rf
 
-def run_classification(df):
+def run_classification(df, scaler_A, label_encoder_transaksi):
     """Menjalankan Random Forest Classification."""
     st.header("Bagian A: Random Forest Classifier (Klasifikasi)")
-    st.markdown("Memprediksi `Jenis Transaksi` (0 atau 1).")
-
+    
     try:
-        # Pengecualian kolom Pemasukan, karena kolom ini akan diprediksi di bagian B
-        kolom_drop_A = ["Jenis Transaksi"]
-        if "Pemasukan" in df.columns:
-            kolom_drop_A.append("Pemasukan")
-            
+        kolom_drop_A = ["Jenis Transaksi", "Pemasukan"]
         X_A = df.drop(kolom_drop_A, axis=1, errors='ignore')
         y_A = df["Jenis Transaksi"]
     except KeyError:
@@ -114,8 +94,7 @@ def run_classification(df):
         X_A, y_A, test_size=0.3, random_state=42
     )
 
-    # Scaling (Fit dan Transform)
-    global scaler_A
+    # Scaling
     X_train_A_scaled = scaler_A.fit_transform(X_train_A)
     X_test_A_scaled = scaler_A.transform(X_test_A)
 
@@ -125,7 +104,9 @@ def run_classification(df):
 
     st.success("Klasifikasi Selesai!")
 
-    # Evaluasi
+    # Evaluasi (Dipotong untuk fokus pada solusi)
+    # ... [Kode Evaluasi tetap sama] ...
+    
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Metrik Kinerja")
@@ -142,11 +123,8 @@ def run_classification(df):
         fig, ax = plt.subplots()
         cax = ax.matshow(cm, cmap=plt.cm.Blues)
         fig.colorbar(cax)
-        
-        # Menambahkan label pada matrix
         for (i, j), val in np.ndenumerate(cm):
             ax.text(j, i, f'{val}', ha='center', va='center', color='red')
-            
         ax.set_title('Confusion Matrix - Random Forest')
         ax.set_xlabel('Prediksi')
         ax.set_ylabel('Aktual')
@@ -155,22 +133,19 @@ def run_classification(df):
     return model_rf, X_A.columns, label_encoder_transaksi.classes_
 
 # ===============================
-# 3. FUNGSI PELATIHAN MODEL REGRESI (Linear Regression)
+# 3. FUNGSI PELATIHAN MODEL REGRESI
 # ===============================
-@st.cache_resource
+@st.cache_resource(show_spinner="Melatih Linear Regression...")
 def train_regression_model(X_train_B, y_train_B):
-    """Melatih dan mengembalikan model Linear Regression."""
-    linreg = LinearRegression()
-    linreg.fit(X_train_B, y_train_B)
-    return linreg
+    model_linreg = LinearRegression()
+    model_linreg.fit(X_train_B, y_train_B)
+    return model_linreg
 
 def run_regression(df):
     """Menjalankan Linear Regression."""
     st.header("Bagian B: Linear Regression (Regresi)")
-    st.markdown("Memprediksi `Pemasukan` berdasarkan fitur lainnya.")
 
     try:
-        # Pengecualian kolom Jenis Transaksi, karena kolom ini sudah di-encode
         X_B = df.drop(["Pemasukan"], axis=1)
         y_B = df["Pemasukan"]
     except KeyError:
@@ -181,13 +156,13 @@ def run_regression(df):
         X_B, y_B, test_size=0.3, random_state=42
     )
 
-    # Pelatihan Model
-    linreg = train_regression_model(X_train_B, y_train_B)
-    y_pred_B = linreg.predict(X_test_B)
+    model_linreg = train_regression_model(X_train_B, y_train_B)
+    y_pred_B = model_linreg.predict(X_test_B)
 
     st.success("Regresi Selesai!")
-
-    # Evaluasi
+    
+    # Evaluasi (Dipotong untuk fokus pada solusi)
+    # ... [Kode Evaluasi tetap sama] ...
     r2 = r2_score(y_test_B, y_pred_B)
     mae = mean_absolute_error(y_test_B, y_pred_B)
 
@@ -209,18 +184,18 @@ def run_regression(df):
         ax.set_title("Linear Regression: Aktual vs Prediksi")
         st.pyplot(fig)
         
-    return linreg
+    return model_linreg
 
 # ===============================
-# 4. FUNGSI INPUT PENGGUNA DAN PREDIKSI (Diperkuat)
+# 4. FUNGSI INPUT PENGGUNA DAN PREDIKSI
 # ===============================
 
-def user_input_features(product_classes):
+def user_input_features(product_classes, label_encoder_product):
     """Mengumpulkan input fitur dari pengguna di sidebar."""
     st.sidebar.header("3. Input Data Baru")
     
-    # Ambil nilai default produk untuk menghindari error jika list kosong
-    product_options = product_classes if len(product_classes) > 0 else ["Produk A (Isi Data Dulu)"]
+    # Ambil nilai default produk yang aman
+    product_options = product_classes if product_classes.size > 0 else ["Produk A (Isi Data Dulu)"]
 
     with st.sidebar.form("input_form"):
         st.markdown("**Detail Transaksi**")
@@ -236,10 +211,9 @@ def user_input_features(product_classes):
         nama_produk = 0 
         if nama_produk_str not in ["Produk A (Isi Data Dulu)", "N/A (Unggah Data Dulu)"]:
             try:
-                # Menggunakan transform yang aman
+                # Menggunakan encoder yang dikembalikan dari fungsi fit
                 nama_produk = label_encoder_product.transform([nama_produk_str])[0]
             except ValueError:
-                # Jika produk yang dipilih tidak dikenal oleh encoder yang di-fit, gunakan 0
                 nama_produk = 0 
                 
         # Kolom Numerik
@@ -273,24 +247,22 @@ def user_input_features(product_classes):
     features = pd.DataFrame(data, index=[0])
     return features, submitted
 
-def display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_classes):
+def display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_classes, scaler_A):
     """Melakukan prediksi pada data input pengguna dan menampilkan hasilnya."""
     st.header("4. Hasil Prediksi untuk Data Baru")
     
-    # Kolom untuk regresi (semua fitur RF kecuali Jenis Transaksi)
     cols_model_linreg = [col for col in cols_model_rf if col != 'Jenis Transaksi'] 
     
     # --- Prediksi Klasifikasi (Jenis Transaksi) ---
     st.subheader("Prediksi Klasifikasi (Jenis Transaksi)")
 
-    # 1. Klasifikasi: Input harus diskalakan
+    # 1. Klasifikasi: Input harus diskalakan menggunakan scaler yang dikembalikan
     X_input_rf = df_input.reindex(columns=cols_model_rf, fill_value=0)
-    X_input_scaled = scaler_A.transform(X_input_rf)
-    
+    X_input_scaled = scaler_A.transform(X_input_rf) # Menggunakan scaler yang di-fit
+
     pred_klasifikasi_num = model_rf.predict(X_input_scaled)[0]
     
     try:
-        # Mengubah prediksi numerik kembali ke label string
         pred_klasifikasi_label = target_classes[int(pred_klasifikasi_num)]
     except IndexError:
         pred_klasifikasi_label = "Label Tidak Dikenal"
@@ -303,7 +275,6 @@ def display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_
     # --- Prediksi Regresi (Pemasukan) ---
     st.subheader("Prediksi Regresi (Pemasukan)")
     
-    # 2. Regresi: Input tidak perlu diskalakan
     X_input_linreg = df_input.reindex(columns=cols_model_linreg, fill_value=0)
     
     pred_regresi = model_linreg.predict(X_input_linreg)[0]
@@ -313,9 +284,8 @@ def display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_
         value=f"Rp **{pred_regresi:,.2f}**"
     )
 
-
 # ===============================
-# 5. STRUKTUR UTAMA APLIKASI (Diperkuat)
+# 5. STRUKTUR UTAMA APLIKASI
 # ===============================
 def main():
     st.title("🚀 Aplikasi Analisis Transaksi Penjualan")
@@ -325,7 +295,9 @@ def main():
     model_rf, model_linreg = None, None
     cols_model_rf = None 
     target_classes = None
-    product_classes = np.array([]) # Gunakan numpy array kosong sebagai default
+    product_classes = np.array([])
+    label_encoder_product = None
+    scaler_A = None
 
     uploaded_file = st.sidebar.file_uploader(
         "Upload file CSV Anda untuk training model", 
@@ -341,8 +313,7 @@ def main():
             st.dataframe(df_raw.head())
             
             # 1. Preprocessing dan Fit Encoders
-            with st.spinner("Membersihkan, mengubah, dan melatih encoders..."):
-                df_clean, product_classes = preprocess_and_fit(df_raw.copy()) 
+            df_clean, label_encoder_product, label_encoder_transaksi, scaler_A, product_classes = preprocess_and_fit(df_raw.copy()) 
             
             st.success("Preprocessing dan Fit Encoders Selesai!")
             st.dataframe(df_clean.head())
@@ -351,7 +322,7 @@ def main():
             
             # 2. Training Model Klasifikasi
             if "Jenis Transaksi" in df_clean.columns and len(df_clean["Jenis Transaksi"].unique()) > 1:
-                model_rf, cols_model_rf, target_classes = run_classification(df_clean.copy())
+                model_rf, cols_model_rf, target_classes = run_classification(df_clean.copy(), scaler_A, label_encoder_transaksi)
                 st.divider()
             else:
                 st.warning("Klasifikasi dilewati: Kolom 'Jenis Transaksi' tidak ada atau hanya memiliki satu kelas unik.")
@@ -366,14 +337,14 @@ def main():
             
             # --- Bagian Prediksi Input Pengguna ---
             
-            if model_rf and model_linreg: 
+            if model_rf and model_linreg and label_encoder_product is not None: 
                 st.sidebar.caption(f"Jumlah produk unik dipelajari: {len(product_classes)}")
                 
-                df_input, submitted = user_input_features(product_classes)
+                df_input, submitted = user_input_features(product_classes, label_encoder_product)
                 
                 if submitted:
                     if cols_model_rf is not None and target_classes is not None:
-                         display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_classes)
+                         display_predictions(df_input, model_rf, model_linreg, cols_model_rf, target_classes, scaler_A)
                     else:
                         st.error("Model Klasifikasi belum selesai diinisialisasi. Tidak dapat memprediksi.")
             else:
@@ -382,7 +353,6 @@ def main():
                 
 
         except Exception as e:
-            # Penanganan error umum
             st.error(f"Terjadi kesalahan saat memproses file: {e}")
             st.info("Pastikan file CSV Anda memiliki struktur kolom yang benar (Tanggal, Nama Produk, Jenis Transaksi, Pemasukan, dll.) dan cobalah lagi.")
 
