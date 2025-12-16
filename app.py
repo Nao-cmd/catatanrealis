@@ -28,7 +28,7 @@ label_encoder_product = LabelEncoder()
 label_encoder_transaksi = LabelEncoder()
 
 # ===============================
-# 1. FUNGSI PREPROCESSING DATA (Diperkuat)
+# 1. FUNGSI PREPROCESSING DATA (Diperkuat Maksimal)
 # ===============================
 @st.cache_data
 def preprocess_and_fit(df):
@@ -52,21 +52,35 @@ def preprocess_and_fit(df):
     for col in kolom_numerik:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna()
+    
+    product_classes = np.array([]) 
 
+    # --- PENANGANAN KRITIS 'NAMA PRODUK' ---
+    if "Nama Produk" in df.columns:
+        # Konversi ke string untuk LabelEncoder
+        data_produk = df["Nama Produk"].astype(str)
+        
+        # Cek apakah ada lebih dari satu nilai unik untuk di-fit
+        if len(data_produk.unique()) > 1:
+            try:
+                # Proses Fitting
+                label_encoder_product.fit(data_produk)
+                df["Nama Produk"] = label_encoder_product.transform(data_produk)
+                product_classes = label_encoder_product.classes_
+            except Exception as e:
+                # Jika fitting gagal (misalnya error memori atau data aneh)
+                st.warning(f"Gagal memproses Nama Produk dengan LabelEncoder: {e}")
+                
+    # --- PENANGANAN 'JENIS TRANSAKSI' ---
+    if "Jenis Transaksi" in df.columns:
+        data_transaksi = df["Jenis Transaksi"].astype(str)
+        if len(data_transaksi.unique()) > 1:
+             try:
+                label_encoder_transaksi.fit(data_transaksi)
+                df["Jenis Transaksi"] = label_encoder_transaksi.transform(data_transaksi)
+             except Exception as e:
+                st.warning(f"Gagal memproses Jenis Transaksi dengan LabelEncoder: {e}")
     
-    product_classes = np.array([]) # Inisialisasi sebagai numpy array kosong
-    
-    # Encoding Data Kategorik (Fit Encoders)
-    if "Nama Produk" in df.columns and len(df["Nama Produk"].unique()) > 0:
-        label_encoder_product.fit(df["Nama Produk"].astype(str))
-        df["Nama Produk"] = label_encoder_product.transform(df["Nama Produk"].astype(str))
-        product_classes = label_encoder_product.classes_ # Ambil classes di sini
-
-    if "Jenis Transaksi" in df.columns and len(df["Jenis Transaksi"].unique()) > 0:
-        label_encoder_transaksi.fit(df["Jenis Transaksi"].astype(str))
-        df["Jenis Transaksi"] = label_encoder_transaksi.transform(df["Jenis Transaksi"].astype(str))
-    
-    # Mengembalikan data yang sudah diproses dan product_classes
     return df, product_classes
 
 # ===============================
